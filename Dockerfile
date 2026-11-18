@@ -7,8 +7,8 @@ RUN curl --fail --silent --show-error --location --retry 3 \
       --output /tmp/pencari.tar.gz \
  && tar -xzf /tmp/pencari.tar.gz --strip-components=1 \
  && rm /tmp/pencari.tar.gz
-COPY patches/flac-pocket.patch /tmp/flac-pocket.patch
-RUN git apply --check /tmp/flac-pocket.patch && git apply /tmp/flac-pocket.patch
+COPY patches/flac-pocket.patch patches/playback.patch /tmp/
+RUN git apply /tmp/flac-pocket.patch && git apply /tmp/playback.patch
 COPY public/pocket/ ./public/pocket/
 ENV PM_BUILD_VERSION=3.1.3
 RUN cargo build --release --locked

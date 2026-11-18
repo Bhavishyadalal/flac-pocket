@@ -6,15 +6,19 @@ const searchStatus = $('search-status');
 const playbackStatus = $('playback-status');
 let searchRequest;
 let streamRequest;
+let startupTimer;
+const STREAM_TIMEOUT = 25000;
+const AUDIO_TIMEOUT = 25000;
 let results = [];
 let queue = [];
 let active = -1;
 
 function mediaURL(value) {
   try {
+    if (typeof value !== 'string' || !value) return null;
     const url = new URL(value, location.origin);
-    if (typeof value !== 'string' || !value ||
-        (url.protocol !== 'https:' && url.origin !== location.origin)) return null;
+    if (url.protocol === 'http:' && location.protocol === 'https:' && url.host === location.host) url.protocol = 'https:';
+    if (url.username || url.password || (url.protocol !== 'https:' && url.origin !== location.origin)) return null;
     return url.href;
   } catch {
     return null;
@@ -99,20 +103,56 @@ async function search() {
   }
 }
 
-async function startAudio(signal = streamRequest?.signal) {
-  try {
-    await audio.play();
-  } catch (error) {
+function stopStartupTimer() {
+  clearTimeout(startupTimer);
+}
+
+function showMediaError() {
+  stopStartupTimer();
+  const code = audio.error?.code;
+  playbackStatus.textContent = code === 3 || code === 4
+    ? 'This browser could not decode the audio, or the source refused it. Try another version or source.'
+    : 'Audio connection interrupted. Press Play to retry.';
+}
+
+function startAudio(signal = streamRequest?.signal) {
+  stopStartupTimer();
+  if (signal?.aborted) return;
+  playbackStatus.textContent = 'Starting audio…';
+  startupTimer = setTimeout(() => {
     if (signal?.aborted) return;
-    if (error.name === 'NotAllowedError') playbackStatus.textContent = 'Press Play to start playback.';
-    else if (error.name !== 'AbortError') playbackStatus.textContent = 'Could not play this stream.';
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.load();
+    playbackStatus.textContent = 'The audio source took too long. Press Play to retry.';
+  }, AUDIO_TIMEOUT);
+
+  // The play promise can stay pending until the browser receives audio.
+  // Keep the transport available, including when autoplay needs another tap.
+  audio.play().catch(error => {
+    if (signal?.aborted || error.name === 'AbortError') return;
+    stopStartupTimer();
+    if (error.name === 'NotAllowedError') {
+      playbackStatus.textContent = 'Press Play to start audio in this browser.';
+    } else {
+      showMediaError();
+    }
+  });
+}
+
+function streamMessage(status) {
+  if (status === 404) return 'This version is unavailable. Choose another result.';
+  if (status === 429 || status === 502 || status === 503 || status === 504) {
+    return 'The music source is temporarily unavailable. Press Play to retry.';
   }
+  return 'Could not open this stream. Press Play to retry or choose another source.';
 }
 
 async function loadTrack(index) {
   const track = queue[index];
   if (!track) return;
   streamRequest?.abort();
+  stopStartupTimer();
   const request = new AbortController();
   streamRequest = request;
   active = index;
@@ -129,19 +169,27 @@ async function loadTrack(index) {
   playbackStatus.textContent = 'Opening stream…';
   highlight();
   updateProgress();
+  const fetchTimeout = setTimeout(() => {
+    request.abort();
+    if (streamRequest === request) playbackStatus.textContent = 'The music source took too long. Press Play to retry.';
+  }, STREAM_TIMEOUT);
   try {
     const response = await fetch('/m/stream/' + encodeURIComponent(track.id), {signal:request.signal, cache:'no-store'});
-    if (!response.ok) throw new Error('Stream failed');
+    if (request.signal.aborted) return;
+    if (!response.ok) {
+      playbackStatus.textContent = streamMessage(response.status);
+      return;
+    }
     const data = await response.json();
     const url = mediaURL(data.url);
     if (!url || data.encrypted) throw new Error('No playable stream');
     if (request.signal.aborted) return;
     audio.src = url;
-    playbackStatus.textContent = '';
-    await startAudio(request.signal);
+    startAudio(request.signal);
   } catch {
-    if (!request.signal.aborted) playbackStatus.textContent = 'Could not open this stream. Try again or select another track.';
+    if (!request.signal.aborted) playbackStatus.textContent = streamMessage(0);
   } finally {
+    clearTimeout(fetchTimeout);
     if (streamRequest === request) $('toggle').disabled = false;
   }
 }
@@ -169,8 +217,12 @@ $('previous').addEventListener('click', () => loadTrack(active - 1));
 $('next').addEventListener('click', () => loadTrack(active + 1));
 $('toggle').addEventListener('click', () => {
   if (!audio.getAttribute('src') || audio.error) void loadTrack(active);
-  else if (audio.paused) void startAudio();
-  else audio.pause();
+  else if (audio.paused) startAudio();
+  else {
+    stopStartupTimer();
+    audio.pause();
+    playbackStatus.textContent = '';
+  }
 });
 $('volume').addEventListener('input', event => { audio.volume = Number(event.target.value); });
 $('seek').addEventListener('input', event => { audio.currentTime = Number(event.target.value); });
@@ -180,9 +232,12 @@ for (const event of ['play', 'pause', 'ended']) audio.addEventListener(event, ()
   $('toggle').classList.toggle('is-playing', playing);
   $('toggle').setAttribute('aria-label', playing ? 'Pause' : 'Play');
 });
-audio.addEventListener('playing', () => { playbackStatus.textContent = ''; });
+audio.addEventListener('playing', () => {
+  stopStartupTimer();
+  playbackStatus.textContent = '';
+});
 audio.addEventListener('error', () => {
-  if (audio.getAttribute('src')) playbackStatus.textContent = 'Audio playback failed. Try another track or source.';
+  if (audio.getAttribute('src')) showMediaError();
 });
 audio.addEventListener('ended', () => loadTrack(active + 1));
 

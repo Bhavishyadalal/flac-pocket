@@ -1,0 +1,186 @@
+diff --git a/src/routes.rs b/src/routes.rs
+--- a/src/routes.rs
++++ b/src/routes.rs
+@@ -8119,14 +8119,10 @@
+     // AND THE BOT LADDER IS THE SHARED ONE — see [`resolve_stream_target`] for why
+     // a single pinned bot was the difference between music and video.
+     let (resolved, resolve_status) = resolve_stream_target(&code).await;
+-    let file_name = {
+-        let t = jstr(&resolved, "title");
+-        if t.is_empty() {
+-            jstr(&resolved, "file_name")
+-        } else {
+-            t
+-        }
+-    };
++    let file_name = {
++        let name = jstr(&resolved, "file_name");
++        if name.is_empty() { jstr(&resolved, "title") } else { name }
++    };
+     if file_name.is_empty() {
+         // Silent before: a 404 with no trail is impossible to debug from a phone.
+         log(
+@@ -8152,14 +8148,20 @@
+         }
+         return Err(stremio_json(404, &serde_json::json!({"error": "Track not found"}), "no-store"));
+     }
+-    let size = resolved.get("file_size").and_then(|v| v.as_u64()).unwrap_or(0);
+-    let ext = file_name
+-        .rsplit_once('.')
+-        .map(|(_, e)| e.to_lowercase())
+-        .unwrap_or_else(|| "mp3".to_string());
+-    if !crate::music::is_audio(&ext) {
+-        return Err(music_not_found());
+-    }
++    let size = resolved.get("file_size").and_then(|value| {
++        value.as_u64().or_else(|| value.as_str()?.parse().ok())
++    }).unwrap_or(0);
++    let mime = jstr(&resolved, "mime");
++    let file_type = jstr(&resolved, "file_type");
++    let ext = match music_extension(&file_name, &mime, &file_type) {
++        Some(ext) => ext,
++        None => return Err(music_not_found()),
++    };
++    let file_name = if file_name.rsplit_once('.').is_some_and(|(_, current)| current.eq_ignore_ascii_case(&ext)) {
++        file_name
++    } else {
++        format!("{file_name}.{ext}")
++    };
+     // NO renaming. The advertised `format` and `mimeType` are the file's own, and
+     // the payload names the file `/api/download` will actually read. The old
+     // `.wav` alias (inherited from backend.php) lied about the container: the
+@@ -8650,26 +8652,50 @@
+ /// Telegram kind (`audio`, `document`). Neither is a MIME, and this string ends
+ /// up as the media `content-type` through the download payload, so a value with
+ /// no `/` falls back to the extension's real type.
+-fn audio_mime(ext: &str, mime: &str, file_type: &str) -> String {
+-    let best = if mime.contains('/') {
+-        mime.trim()
+-    } else if file_type.contains('/') {
+-        file_type.trim()
+-    } else {
+-        ""
+-    };
+-    if !best.is_empty() {
+-        return best.to_string();
+-    }
+-    match ext {
+-        "flac" => "audio/x-flac",
+-        "mp3" => "audio/mpeg",
+-        "m4a" | "mp4" | "aac" => "audio/mp4",
+-        "ogg" | "oga" | "opus" => "audio/ogg",
+-        "wav" => "audio/wav",
+-        _ => "audio/mpeg",
+-    }
+-    .to_string()
++fn music_extension(name: &str, mime: &str, file_type: &str) -> Option<String> {
++    if let Some((_, ext)) = name.rsplit_once('.') {
++        let ext = ext.to_ascii_lowercase();
++        if crate::music::is_audio(&ext) {
++            return Some(ext);
++        }
++    }
++    [mime, file_type].into_iter().find_map(|value| {
++        Some(match value.split(';').next()?.trim().to_ascii_lowercase().as_str() {
++            "audio/flac" | "audio/x-flac" => "flac",
++            "audio/mpeg" | "audio/mp3" => "mp3",
++            "audio/mp4" | "audio/x-m4a" => "m4a",
++            "audio/aac" => "aac",
++            "audio/wav" | "audio/x-wav" => "wav",
++            "audio/ogg" => "ogg",
++            "audio/opus" => "opus",
++            _ => return None,
++        }.to_string())
++    })
++}
++
++#[cfg(test)]
++#[test]
++fn music_extension_uses_audio_metadata_instead_of_guessing_mp3() {
++    assert_eq!(music_extension("Real track.FLAC", "application/octet-stream", "").as_deref(), Some("flac"));
++    assert_eq!(music_extension("Display title pt. 2", "audio/mp4", "").as_deref(), Some("m4a"));
++    assert_eq!(music_extension("Unknown", "", "audio"), None);
++    assert_eq!(music_extension("Video.mp4", "video/mp4", ""), None);
++}
++
++fn audio_mime(ext: &str, mime: &str, file_type: &str) -> String {
++    match ext {
++        "flac" => "audio/x-flac",
++        "mp3" => "audio/mpeg",
++        "m4a" | "m4b" | "alac" => "audio/mp4",
++        "aac" => "audio/aac",
++        "ogg" | "oga" | "opus" => "audio/ogg",
++        "wav" => "audio/wav",
++        "aif" | "aiff" => "audio/aiff",
++        "mka" => "audio/x-matroska",
++        "wma" => "audio/x-ms-wma",
++        _ => [mime, file_type].into_iter().find(|value| value.starts_with("audio/"))
++            .unwrap_or("application/octet-stream"),
++    }.to_string()
+ }
+ 
+ /// The bot that will PERFORM an upload — a pool pick, not always the primary.
+diff --git a/src/download.rs b/src/download.rs
+--- a/src/download.rs
++++ b/src/download.rs
+@@ -1747,19 +1747,21 @@
+                 let t = jstr(&resolved, "title");
+                 if t.is_empty() { jstr(&resolved, "file_name") } else { t }
+             };
+-            if !name.is_empty() {
+-                file_name = name;
+-            }
+-            let mime = {
+-                let m = jstr(&resolved, "mime");
+-                if m.is_empty() {
+-                    let ft = jstr(&resolved, "file_type");
+-                    if ft.is_empty() { file_mime.clone() } else { ft }
+-                } else {
+-                    m
+-                }
+-            };
+-            file_mime = guess_video_mime(&file_name, &mime);
++            if !signed_music {
++                if !name.is_empty() {
++                    file_name = name;
++                }
++                let mime = {
++                    let m = jstr(&resolved, "mime");
++                    if m.is_empty() {
++                        let ft = jstr(&resolved, "file_type");
++                        if ft.is_empty() { file_mime.clone() } else { ft }
++                    } else {
++                        m
++                    }
++                };
++                file_mime = guess_video_mime(&file_name, &mime);
++            }
+             let rb = jstr(&resolved, "bot_id");
+             if !rb.is_empty() {
+                 bot_id = rb;
+@@ -1798,8 +1800,10 @@
+         return json_response(400, &body);
+     }
+ 
+-    file_name = stream_filename(&file_name, &file_mime);
+-    file_mime = guess_video_mime(&file_name, &file_mime);
++    if !signed_music {
++        file_name = stream_filename(&file_name, &file_mime);
++        file_mime = guess_video_mime(&file_name, &file_mime);
++    }
+ 
+     if file_size == 0 || file_name.is_empty() || file_mime.is_empty() {
+         record_refusal(
+@@ -1975,8 +1979,10 @@
+         }),
+     );
+ 
+-    file_name = stream_filename(&file_name, &file_mime);
+-    file_mime = guess_video_mime(&file_name, &file_mime);
++    if !signed_music {
++        file_name = stream_filename(&file_name, &file_mime);
++        file_mime = guess_video_mime(&file_name, &file_mime);
++    }
+ 
+     /* ── stream ─────────────────────────────────────────────────────────── */
+     let range_header = ctx.hdr("range");
