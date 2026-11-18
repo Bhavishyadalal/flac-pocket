@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex">
+  <meta name="description" content="Set up your personal FLAC Pocket music addon.">
+  <title>FLAC Pocket</title>
+  <link rel="icon" href="/pocket/mark.png">
+  <link rel="stylesheet" href="/pocket/style.css">
+  <script src="/pocket/app.js" defer></script>
+</head>
+<body>
+  <header class="bar">
+    <a class="brand" href="/"><img src="/pocket/mark.png" alt="" width="40" height="40"> FLAC Pocket</a>
+    <a class="settings" href="/dashboard">Server settings <span aria-hidden="true">↗</span></a>
+  </header>
+  <main>
+    <div class="intro">
+      <p class="eyebrow">Personal music addon</p>
+      <h1>FLAC <span>Pocket.</span></h1>
+      <p>Connect your music player and stream tracks from your PencariMusic catalog.</p>
+    </div>
+    <section class="card" aria-labelledby="setup-title">
+      <div class="card-head">
+        <img src="/pocket/mark.png" alt="" width="46" height="46">
+        <div><h2 id="setup-title">Connect your player</h2><p>Works with BitChord and Eclipse Music</p></div>
+      </div>
+      <form id="setup" method="post">
+        <label for="token">Private addon token</label>
+        <div class="fields">
+          <input id="token" type="password" placeholder="Paste your SERVER_TOKEN" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="token-hint" required>
+          <button id="verify" class="primary" type="submit">Get addon link <span aria-hidden="true">→</span></button>
+        </div>
+        <p id="token-hint" class="hint">Use the SERVER_TOKEN you set when deploying this server.</p>
+      </form>
+      <p id="status" class="status" role="status"></p>
+      <div id="result" hidden>
+        <label for="link">Private addon link</label>
+        <div class="fields">
+          <input id="link" type="password" readonly autocomplete="off" aria-describedby="link-warning">
+          <button id="show" type="button" class="secondary" aria-controls="link">Show link</button>
+          <button id="copy" type="button" class="primary">Copy link</button>
+        </div>
+        <p class="hint" id="link-warning">Keep this link private. Paste it into <strong>Settings → Sources → Add addon</strong> in BitChord or <strong>Settings → Connections → Add Connection → Addon</strong> in Eclipse Music.</p>
+      </div>
+    </section>
+  </main>
+  <footer>Powered by <a href="https://github.com/aiskendi/pencarimovie-server" rel="noreferrer">PencariMovie Server</a></footer>
+</body>
+</html>

@@ -1,0 +1,167 @@
+diff --git a/src/auth.rs b/src/auth.rs
+index 810c8e0..4c512f1 100644
+--- a/src/auth.rs
++++ b/src/auth.rs
+@@ -718,9 +718,28 @@ fn find_t_prefix(path: &str) -> Option<(String, String)> {
+     }
+ }
+ 
+-/// Token from `/<hex32+>/` prefix, `/t/<token>/`, `?token=`, `X-Auth-Token`, or
++/// The short music path accepts only the stock 128-bit server-token format.
++fn pocket_prefix(path: &str) -> Option<(String, String)> {
++    let (token, tail) = find_token_prefix(path.strip_prefix("/m")?)?;
++    (token.len() == 32).then(|| (token.to_ascii_lowercase(), tail))
++}
++
++/// Resolve a short music URL only after checking its explicit token. The
++/// dashboard's LAN and cookie rules do not authorize this URL by themselves.
++pub fn pocket_music_path(path: &str) -> Option<String> {
++    let (token, tail) = pocket_prefix(path)?;
++    auth_valid_tokens()
++        .iter()
++        .any(|expected| ct_eq(expected, &token))
++        .then(|| format!("/music{}", tail))
++}
++
++/// Token from a short music path, `/<hex32+>/` prefix, `/t/<token>/`, `?token=`, `X-Auth-Token`, or
+ /// the `pm_auth` cookie. Keep `{32,}` in sync with `strip_token_prefix()`.
+ pub fn auth_token_from_request(ctx: &ReqCtx) -> String {
++    if let Some((token, _)) = pocket_prefix(&ctx.raw_path) {
++        return token;
++    }
+     if let Some((t, _)) = find_token_prefix(&ctx.raw_path) {
+         return t.to_ascii_lowercase();
+     }
+@@ -808,6 +827,18 @@ pub fn strip_token_prefix(path: &str) -> String {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn parses_only_the_supported_short_music_prefix() {
++        let token = "0123456789ABCDEF0123456789ABCDEF";
++        assert_eq!(
++            pocket_prefix(&format!("/m/{token}/stream/a")),
++            Some((token.to_ascii_lowercase(), "/stream/a".to_string()))
++        );
++        assert!(pocket_prefix("/m/short/manifest.json").is_none());
++        assert!(pocket_prefix(&format!("/music/{token}/manifest.json")).is_none());
++        assert!(pocket_prefix(&format!("/m/{token}a/manifest.json")).is_none());
++    }
++
+     #[test]
+     fn strips_hex_token_prefix() {
+         assert_eq!(
+diff --git a/src/music_addon.rs b/src/music_addon.rs
+index bcf65c7..7bb4364 100644
+--- a/src/music_addon.rs
++++ b/src/music_addon.rs
+@@ -81,12 +81,12 @@ pub fn canonical_row(id: &str) -> Option<&'static str> {
+ /// still maps them) so an already-installed row keeps answering; search, the
+ /// artists row and the sponsor row are the browse surface now.
+ pub fn manifest(base: &str, version: &str) -> Value {
+-    let logo = format!("{}/logo.png", base.trim_end_matches('/'));
++    let logo = format!("{}/pocket/mark.png", base.trim_end_matches('/'));
+     json!({
+-        "id": "pencarimovie.com",
+-        "name": "PencariMusic (PencariMovie.Com)",
++        "id": "io.github.bhavishyadalal.flacpocket",
++        "name": "FLAC Pocket",
+         "version": version,
+-        "description": DESCRIPTION,
++        "description": "Personal music addon powered by PencariMovie Server.",
+         "icon": logo.clone(),
+         "logo": logo.clone(),
+         "background": logo,
+@@ -106,9 +106,9 @@ pub fn manifest(base: &str, version: &str) -> Value {
+             // Stremio/Nuvio Discover and Search: the search row is the one a
+             // query is routed through (`extra.search`), the artists row is the
+             // browse row, and the sponsor row is the brand tile.
+-            {"id": "pm_music_search",  "type": "movie", "name": "PencariMusic · Search",
++            {"id": "pm_music_search",  "type": "movie", "name": "FLAC Pocket · Search",
+              "extra": [{"name": "search", "isRequired": true}]},
+-            {"id": "pm_music_artists", "type": "series", "name": "PencariMusic · Artists"},
++            {"id": "pm_music_artists", "type": "series", "name": "FLAC Pocket · Artists"},
+             {"id": "pm_music_sponsor", "type": "movie", "name": "PencariMusic"}
+         ]
+     })
+@@ -751,10 +751,10 @@ mod tests {
+     #[test]
+     fn the_manifest_names_the_brand_and_both_type_families() {
+         let m = manifest("http://127.0.0.1:18099/", "3.1.2");
+-        assert_eq!(m["name"], "PencariMusic (PencariMovie.Com)");
++        assert_eq!(m["name"], "FLAC Pocket");
+         assert_eq!(m["version"], "3.1.2");
+-        assert_eq!(m["id"], "pencarimovie.com");
+-        assert_eq!(m["description"], DESCRIPTION);
++        assert_eq!(m["id"], "io.github.bhavishyadalal.flacpocket");
++        assert_eq!(m["description"], "Personal music addon powered by PencariMovie Server.");
+         assert!(m["resources"].as_array().unwrap().iter().any(|r| r == "meta"));
+         assert!(m["types"].as_array().unwrap().iter().any(|t| t == "movie"));
+         assert!(m["types"].as_array().unwrap().iter().any(|t| t == "series"));
+@@ -799,7 +799,7 @@ mod tests {
+         assert_eq!(search["type"], "movie");
+         assert_eq!(search["extra"][0]["name"], "search");
+         assert_eq!(search["extra"][0]["isRequired"], true);
+-        assert_eq!(m["icon"], "http://127.0.0.1:18099/logo.png");
++        assert_eq!(m["icon"], "http://127.0.0.1:18099/pocket/mark.png");
+     }
+ 
+     #[test]
+diff --git a/src/routes.rs b/src/routes.rs
+index c4bbf68..a32ff81 100644
+--- a/src/routes.rs
++++ b/src/routes.rs
+@@ -193,7 +193,18 @@ pub async fn handle(state: Arc<AppState>, req: Request<Body>) -> Response {
+             .unwrap_or_else(|_| json_response(500, &serde_json::json!({"ok": 0})));
+     }
+ 
+-    ctx.path = strip_token_prefix(&ctx.path);
++    ctx.path = if ctx.path.starts_with("/m/") {
++        match crate::auth::pocket_music_path(&ctx.path) {
++            Some(path) => path,
++            None => return stremio_json(
++                401,
++                &serde_json::json!({"error": "A valid FLAC Pocket token is required."}),
++                "no-store",
++            ),
++        }
++    } else {
++        strip_token_prefix(&ctx.path)
++    };
+     crate::storage::prune_cache_files(false);
+     let p = ctx.path.clone();
+     let m = method.clone();
+@@ -414,6 +425,10 @@ pub async fn handle(state: Arc<AppState>, req: Request<Body>) -> Response {
+     }
+ 
+     /* ── lightweight public routes (no version gate) ──────────────────────── */
++    if p == "/health" {
++        return stremio_json(200, &serde_json::json!({"ok": true}), "no-store");
++    }
++
+     if p == "/api/version" {
+         return json_response(200, &check_version().await);
+     }
+@@ -2036,12 +2051,21 @@ pub async fn handle(state: Arc<AppState>, req: Request<Body>) -> Response {
+         || configure_path == "/manifest.json/configure"
+         || configure_path == "/manifest.json/config"
+     {
+-        return redirect("/#catalogs");
++        return redirect("/dashboard#catalogs");
+     }
+     // Everything below `/api/*`, `/manifest.json`, `/catalog|meta|stream|
+     // subtitles|eclipse` has already been answered above, so anything left is
+     // the dashboard and its assets. They are served FROM DISK — this port does
+     // not need the PHP runtime for the UI.
++    if matches!(p.as_str(), "/" | "/index.html")
++        && let Some(mut response) = serve_static("/pocket/index.html")
++    {
++        response.headers_mut().insert(
++            header::CACHE_CONTROL,
++            header::HeaderValue::from_static("no-store"),
++        );
++        return response;
++    }
+     if let Some(resp) = serve_static(&p) {
+         return resp;
+     }

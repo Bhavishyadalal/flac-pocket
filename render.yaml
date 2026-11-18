@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: flac-pocket
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: SERVER_TOKEN
+        sync: false
+      - key: SERVER_PASSWORD
+        sync: false
