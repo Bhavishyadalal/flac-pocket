@@ -47,8 +47,9 @@ button:not(:disabled):hover { filter: brightness(1.12); }
 :focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; }
 .status { margin: .75rem 0 0; color: var(--mint); }
 .status:empty { margin: 0; }
-.status[data-error="true"] { color: #ffb6ac; }
-#result { border-top: 1px solid var(--line); margin-top: 1.3rem; padding-top: 1.2rem; }
+.tools { max-width: 42rem; margin-top: 1.2rem; padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; }
+.tools summary { cursor: pointer; font-weight: 650; }
+.tools label { margin-top: .8rem; }
 footer { padding-block: 1.1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .88rem; }
 @media (max-width: 34rem) {
   .fields input { flex-basis: 100%; }

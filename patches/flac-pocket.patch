@@ -1,8 +1,20 @@
+diff --git a/public/index.html b/public/index.html
+index d0fd90c..ce51f5b 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -857,6 +857,7 @@
+                  over: renderSettingsVersion() wrote the same string into both,
+                  and in the old gate only one was ever on screen. -->
+             <h2 class="pm-h2">Telegram bot pool</h2>
++            <p>PencariMovie automatically connects a guest bot for streaming. You can also connect your own Telegram bot.</p>
+             <div
+             id="settingsConnectedStatus"
+             class="settings-gate__status"
 diff --git a/src/auth.rs b/src/auth.rs
-index 810c8e0..4c512f1 100644
+index 810c8e0..36dd5a4 100644
 --- a/src/auth.rs
 +++ b/src/auth.rs
-@@ -718,9 +718,28 @@ fn find_t_prefix(path: &str) -> Option<(String, String)> {
+@@ -718,9 +718,58 @@ fn find_t_prefix(path: &str) -> Option<(String, String)> {
      }
  }
  
@@ -23,6 +35,36 @@ index 810c8e0..4c512f1 100644
 +        .then(|| format!("/music{}", tail))
 +}
 +
++fn music_download_key() -> ed25519_dalek::SigningKey {
++    let mut hash = Sha256::new();
++    hash.update(b"flac-pocket:music-download:v1:");
++    hash.update(auth_token().as_bytes());
++    ed25519_dalek::SigningKey::from_bytes(&hash.finalize().into())
++}
++
++pub fn sign_music_download(path: &str) -> String {
++    use ed25519_dalek::Signer;
++    let signature = music_download_key().sign(path.as_bytes());
++    crate::fileid::base64url_encode(&signature.to_bytes())
++}
++
++/// Validate the entire path before handing it to the shared download handler.
++pub fn signed_music_download(path: &str, now: i64) -> Option<String> {
++    let (signature, signed) = path.strip_prefix("/m/audio/")?.split_once('/')?;
++    let (expires, file) = signed.split_once('/')?;
++    let (payload, filename) = file.split_once('/')?;
++    if expires.parse::<i64>().ok()? <= now || payload.is_empty() || filename.is_empty() {
++        return None;
++    }
++    let bytes = crate::fileid::base64url_decode(signature);
++    let signature = ed25519_dalek::Signature::from_slice(&bytes).ok()?;
++    music_download_key()
++        .verifying_key()
++        .verify_strict(signed.as_bytes(), &signature)
++        .ok()?;
++    Some(format!("/api/download/{file}"))
++}
++
 +/// Token from a short music path, `/<hex32+>/` prefix, `/t/<token>/`, `?token=`, `X-Auth-Token`, or
  /// the `pm_auth` cookie. Keep `{32,}` in sync with `strip_token_prefix()`.
  pub fn auth_token_from_request(ctx: &ReqCtx) -> String {
@@ -32,10 +74,26 @@ index 810c8e0..4c512f1 100644
      if let Some((t, _)) = find_token_prefix(&ctx.raw_path) {
          return t.to_ascii_lowercase();
      }
-@@ -808,6 +827,18 @@ pub fn strip_token_prefix(path: &str) -> String {
+@@ -808,6 +857,34 @@ pub fn strip_token_prefix(path: &str) -> String {
  mod tests {
      use super::*;
  
++    #[test]
++    fn music_download_tickets_are_scoped_and_expire() {
++        let signed = "1000/payload/track.flac";
++        let signature = sign_music_download(signed);
++        let url = format!("/m/audio/{signature}/{signed}");
++        assert_eq!(
++            signed_music_download(&url, 999).as_deref(),
++            Some("/api/download/payload/track.flac")
++        );
++        assert!(signed_music_download(&url, 1000).is_none());
++        assert!(signed_music_download(&url.replace("payload", "other"), 999).is_none());
++        assert!(signed_music_download(&url.replace("track.flac", "other.flac"), 999).is_none());
++        assert!(signed_music_download(&url.replace("1000", "2000"), 999).is_none());
++        assert!(signed_music_download(&url.replace("/m/audio/", "/api/auth/"), 999).is_none());
++    }
++
 +    #[test]
 +    fn parses_only_the_supported_short_music_prefix() {
 +        let token = "0123456789ABCDEF0123456789ABCDEF";
@@ -51,6 +109,22 @@ index 810c8e0..4c512f1 100644
      #[test]
      fn strips_hex_token_prefix() {
          assert_eq!(
+diff --git a/src/download.rs b/src/download.rs
+index ab6b5bb..f97bfb8 100644
+--- a/src/download.rs
++++ b/src/download.rs
+@@ -1247,9 +1247,9 @@ fn boot_at() -> i64 {
+     *BOOT.get_or_init(now)
+ }
+ 
+-pub async fn handle_download(state: &Arc<AppState>, ctx: &ReqCtx) -> Response {
++pub async fn handle_download(state: &Arc<AppState>, ctx: &ReqCtx, signed_music: bool) -> Response {
+     let started = std::time::Instant::now();
+-    if !is_authenticated(ctx) {
++    if !signed_music && !is_authenticated(ctx) {
+         record_refusal(ctx, started, 401, "AUTH_REQUIRED", "Server password or token required", "", serde_json::json!({}));
+         return json_response(
+             401,
 diff --git a/src/music_addon.rs b/src/music_addon.rs
 index bcf65c7..7bb4364 100644
 --- a/src/music_addon.rs
@@ -108,15 +182,35 @@ index bcf65c7..7bb4364 100644
  
      #[test]
 diff --git a/src/routes.rs b/src/routes.rs
-index c4bbf68..a32ff81 100644
+index c4bbf68..0785d69 100644
 --- a/src/routes.rs
 +++ b/src/routes.rs
-@@ -193,7 +193,18 @@ pub async fn handle(state: Arc<AppState>, req: Request<Body>) -> Response {
+@@ -193,7 +193,38 @@ pub async fn handle(state: Arc<AppState>, req: Request<Body>) -> Response {
              .unwrap_or_else(|_| json_response(500, &serde_json::json!({"ok": 0})));
      }
  
 -    ctx.path = strip_token_prefix(&ctx.path);
-+    ctx.path = if ctx.path.starts_with("/m/") {
++    if ctx.path.starts_with("/m/audio/") {
++        if !matches!(method.as_str(), "GET" | "HEAD") {
++            return stremio_json(405, &serde_json::json!({"error": "Method not allowed"}), "no-store");
++        }
++        let Some(path) = crate::auth::signed_music_download(&ctx.path, crate::storage::now()) else {
++            return stremio_json(401, &serde_json::json!({"error": "Invalid or expired stream link"}), "no-store");
++        };
++        ctx.path = path;
++        // Authorization covers only the signed path, never query overrides.
++        ctx.query.clear();
++        return allow_private_network(handle_download(&state, &ctx, true).await);
++    }
++
++    let public_music_path = public_pocket_music_path(&ctx.path);
++    let public_music = public_music_path.is_some();
++    ctx.path = if let Some(path) = public_music_path {
++        if !matches!(method.as_str(), "GET" | "HEAD") {
++            return stremio_json(405, &serde_json::json!({"error": "Method not allowed"}), "no-store");
++        }
++        format!("/music/{path}")
++    } else if ctx.path.starts_with("/m/") {
 +        match crate::auth::pocket_music_path(&ctx.path) {
 +            Some(path) => path,
 +            None => return stremio_json(
@@ -131,7 +225,7 @@ index c4bbf68..a32ff81 100644
      crate::storage::prune_cache_files(false);
      let p = ctx.path.clone();
      let m = method.clone();
-@@ -414,6 +425,10 @@ pub async fn handle(state: Arc<AppState>, req: Request<Body>) -> Response {
+@@ -414,6 +445,10 @@ pub async fn handle(state: Arc<AppState>, req: Request<Body>) -> Response {
      }
  
      /* ── lightweight public routes (no version gate) ──────────────────────── */
@@ -142,7 +236,34 @@ index c4bbf68..a32ff81 100644
      if p == "/api/version" {
          return json_response(200, &check_version().await);
      }
-@@ -2036,12 +2051,21 @@ pub async fn handle(state: Arc<AppState>, req: Request<Body>) -> Response {
+@@ -1513,7 +1548,7 @@ pub async fn handle(state: Arc<AppState>, req: Request<Body>) -> Response {
+         // LOOPBACK url, so the media response itself must carry
+         // `Access-Control-Allow-Private-Network` or Chrome drops it after the
+         // preflight succeeded.
+-        return allow_private_network(handle_download(&state, &ctx).await);
++        return allow_private_network(handle_download(&state, &ctx, false).await);
+     }
+ 
+     /* ── /api/thumb — the poster twin of /api/download ────────────────────── */
+@@ -1607,7 +1642,7 @@ pub async fn handle(state: Arc<AppState>, req: Request<Body>) -> Response {
+         p
+     };
+     if p.starts_with("/eclipse") {
+-        if !is_authenticated(&ctx) {
++        if !public_music && !is_authenticated(&ctx) {
+             return music_locked(&ctx.base_url);
+         }
+         if p == "/eclipse" || p == "/eclipse/manifest.json" {
+@@ -1680,7 +1715,7 @@ pub async fn handle(state: Arc<AppState>, req: Request<Body>) -> Response {
+             // medium/low/unpublished never fill: a fill uploads a MASTER, so it can
+             // never be the thing those tiers were missing. `tier_satisfied` holds
+             // that rule, and its test names it.
+-            if !q.trim().is_empty() && !tier_satisfied(&rows, &ctx.qs("quality")) {
++            if !public_music && !q.trim().is_empty() && !tier_satisfied(&rows, &ctx.qs("quality")) {
+                 // A pool pick, not the primary bot: uploads are rate-limited per
+                 // ACCOUNT, and a fleet all uploading through one bot floods
+                 // (`upload.saveBigFilePart` 420). See `upload_bot`.
+@@ -2036,12 +2071,21 @@ pub async fn handle(state: Arc<AppState>, req: Request<Body>) -> Response {
          || configure_path == "/manifest.json/configure"
          || configure_path == "/manifest.json/config"
      {
@@ -165,3 +286,46 @@ index c4bbf68..a32ff81 100644
      if let Some(resp) = serve_static(&p) {
          return resp;
      }
+@@ -4873,6 +4917,23 @@ fn build_stream_url(base_url: &str, payload_b64: &str, file_name: &str) -> Strin
+     )
+ }
+ 
++fn public_pocket_music_path(path: &str) -> Option<&str> {
++    let route = path.strip_prefix("/m/")?;
++    let endpoint = route.split('/').next()?;
++    matches!(endpoint, "manifest.json" | "search" | "catalog" | "meta" | "artist" | "album" | "playlist" | "stream" | "play")
++        .then_some(route)
++}
++
++fn pocket_download_url(base_url: &str, payload: &Value, file_name: &str) -> String {
++    // Native players can reuse this URL for Range requests and seeking.
++    let expires = crate::storage::now() + 24 * 60 * 60;
++    let encoded = crate::fileid::base64url_encode(payload.to_string().as_bytes());
++    let filename = urlencode_component(file_name);
++    let signed = format!("{expires}/{encoded}/{filename}");
++    let signature = crate::auth::sign_music_download(&signed);
++    format!("{}/m/audio/{signature}/{signed}", rtrim(base_url))
++}
++
+ /* ── small helpers ───────────────────────────────────────────────────────── */
+ 
+ fn req_for_headers() -> Request<Body> {
+@@ -8058,6 +8119,9 @@ async fn music_stream_payload(ctx: &ReqCtx, short_code: &str) -> Result<MusicStr
+         .rsplit_once('.')
+         .map(|(_, e)| e.to_lowercase())
+         .unwrap_or_else(|| "mp3".to_string());
++    if !crate::music::is_audio(&ext) {
++        return Err(music_not_found());
++    }
+     // NO renaming. The advertised `format` and `mimeType` are the file's own, and
+     // the payload names the file `/api/download` will actually read. The old
+     // `.wav` alias (inherited from backend.php) lied about the container: the
+@@ -8106,7 +8170,7 @@ async fn music_stream_payload(ctx: &ReqCtx, short_code: &str) -> Result<MusicStr
+         &file_id_mt,
+         &bot_for_payload,
+     );
+-    let url = stream_url(&ctx.base_url, &payload, &file_name);
++    let url = pocket_download_url(&ctx.base_url, &payload, &file_name);
+     let mut body = serde_json::json!({
+         "url": url,
+         "format": ext,

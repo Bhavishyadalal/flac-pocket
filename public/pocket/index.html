@@ -9,7 +9,7 @@
   <title>FLAC Pocket</title>
   <link rel="icon" href="/pocket/mark.png">
   <link rel="stylesheet" href="/pocket/style.css">
-  <script src="/pocket/app.js" defer></script>
+  <script src="/pocket/app.js?v=public-link" defer></script>
 </head>
 <body>
   <header class="bar">
@@ -27,25 +27,24 @@
         <img src="/pocket/mark.png" alt="" width="46" height="46">
         <div><h2 id="setup-title">Connect your player</h2><p>Works with BitChord and Eclipse Music</p></div>
       </div>
-      <form id="setup" method="post">
-        <label for="token">Private addon token</label>
-        <div class="fields">
-          <input id="token" type="password" placeholder="Paste your SERVER_TOKEN" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="token-hint" required>
-          <button id="verify" class="primary" type="submit">Get addon link <span aria-hidden="true">→</span></button>
-        </div>
-        <p id="token-hint" class="hint">Use the SERVER_TOKEN you set when deploying this server.</p>
-      </form>
-      <p id="status" class="status" role="status"></p>
-      <div id="result" hidden>
-        <label for="link">Private addon link</label>
-        <div class="fields">
-          <input id="link" type="password" readonly autocomplete="off" aria-describedby="link-warning">
-          <button id="show" type="button" class="secondary" aria-controls="link">Show link</button>
-          <button id="copy" type="button" class="primary">Copy link</button>
-        </div>
-        <p class="hint" id="link-warning">Keep this link private. Paste it into <strong>Settings → Sources → Add addon</strong> in BitChord or <strong>Settings → Connections → Add Connection → Addon</strong> in Eclipse Music.</p>
+      <label for="link">Music addon URL</label>
+      <div class="fields">
+        <input id="link" type="url" readonly aria-describedby="install-help">
+        <button id="copy" type="button" class="primary">Copy addon link</button>
       </div>
+      <p class="hint" id="install-help">Paste it into <strong>Settings → Sources → Add addon</strong> in BitChord or <strong>Settings → Connections → Add Connection → Addon</strong> in Eclipse Music.</p>
+      <p id="status" class="status" role="status"></p>
     </section>
+    <details class="tools">
+      <summary>Keep-alive setup</summary>
+      <p class="hint">In your cron service, send a GET request to this URL every 10 minutes.</p>
+      <label for="health-link">Health check URL</label>
+      <div class="fields">
+        <input id="health-link" type="url" readonly>
+        <button id="copy-health" type="button" class="secondary">Copy health URL</button>
+      </div>
+      <p id="health-status" class="status" role="status"></p>
+    </details>
   </main>
   <footer>Powered by <a href="https://github.com/aiskendi/pencarimovie-server" rel="noreferrer">PencariMovie Server</a></footer>
 </body>
