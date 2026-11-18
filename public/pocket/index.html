@@ -5,47 +5,77 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta name="robots" content="noindex">
-  <meta name="description" content="Set up your personal FLAC Pocket music addon.">
-  <title>FLAC Pocket</title>
+  <meta name="description" content="Search and listen with FLAC Pocket.">
+  <title>FLAC Pocket · Music player</title>
   <link rel="icon" href="/pocket/mark.png">
-  <link rel="stylesheet" href="/pocket/style.css">
-  <script src="/pocket/app.js?v=public-link" defer></script>
+  <link rel="stylesheet" href="/pocket/style.css?v=player">
+  <script src="/pocket/app.js?v=player" defer></script>
 </head>
 <body>
   <header class="bar">
-    <a class="brand" href="/"><img src="/pocket/mark.png" alt="" width="40" height="40"> FLAC Pocket</a>
-    <a class="settings" href="/dashboard">Server settings <span aria-hidden="true">↗</span></a>
+    <a class="brand" href="/"><img src="/pocket/mark.png" alt="" width="36" height="36"><span>FLAC <b>Pocket</b></span></a>
+    <nav aria-label="Main navigation"><a href="/" aria-current="page">Listen</a><a href="/pocket/sources.html">Sources</a><a href="#addon">Install addon</a></nav>
   </header>
+
   <main>
-    <div class="intro">
-      <p class="eyebrow">Personal music addon</p>
-      <h1>FLAC <span>Pocket.</span></h1>
-      <p>Connect your music player and stream tracks from your PencariMusic catalog.</p>
-    </div>
-    <section class="card" aria-labelledby="setup-title">
-      <div class="card-head">
-        <img src="/pocket/mark.png" alt="" width="46" height="46">
-        <div><h2 id="setup-title">Connect your player</h2><p>Works with BitChord and Eclipse Music</p></div>
+    <section class="hero" aria-labelledby="title">
+      <div class="hero-content">
+        <h1 id="title">Find your<br><span>next listen.</span></h1>
+        <form id="search-form" role="search">
+          <label class="sr-only" for="query">Track, artist, or album</label>
+          <div class="search-box">
+            <span class="glass" aria-hidden="true"></span>
+            <input id="query" type="search" placeholder="Track, artist, or album" maxlength="180" required>
+            <button class="primary" type="submit">Search</button>
+          </div>
+          <div class="filters">
+            <label for="source">Source</label>
+            <select id="source"><option value="">All sources</option><option value="pencari">PencariMusic</option></select>
+          </div>
+        </form>
       </div>
-      <label for="link">Music addon URL</label>
-      <div class="fields">
-        <input id="link" type="url" readonly aria-describedby="install-help">
-        <button id="copy" type="button" class="primary">Copy addon link</button>
-      </div>
-      <p class="hint" id="install-help">Paste it into <strong>Settings → Sources → Add addon</strong> in BitChord or <strong>Settings → Connections → Add Connection → Addon</strong> in Eclipse Music.</p>
-      <p id="status" class="status" role="status"></p>
+      <div class="sleeve" aria-hidden="true"><div class="spectrum"><i style="--height:20%"></i><i style="--height:32%"></i><i style="--height:47%"></i><i style="--height:31%"></i><i style="--height:65%"></i><i style="--height:86%"></i><i style="--height:58%"></i><i style="--height:96%"></i><i style="--height:78%"></i><i style="--height:55%"></i><i style="--height:68%"></i><i style="--height:39%"></i><i style="--height:28%"></i><i style="--height:44%"></i><i style="--height:24%"></i><i style="--height:13%"></i></div></div>
     </section>
-    <details class="tools">
-      <summary>Keep-alive setup</summary>
-      <p class="hint">In your cron service, send a GET request to this URL every 10 minutes.</p>
-      <label for="health-link">Health check URL</label>
-      <div class="fields">
-        <input id="health-link" type="url" readonly>
-        <button id="copy-health" type="button" class="secondary">Copy health URL</button>
-      </div>
-      <p id="health-status" class="status" role="status"></p>
-    </details>
+
+    <section class="results" aria-labelledby="results-title">
+      <div class="section-heading"><h2 id="results-title">Tracks</h2><p id="search-status" role="status">Search by track or artist to start listening.</p></div>
+      <ol id="tracks" class="track-list"></ol>
+    </section>
+
+    <section class="details-grid" id="addon" aria-label="Addon links">
+      <details open>
+        <summary>Install in your music app</summary>
+        <p>Paste this link into BitChord or Eclipse Music.</p>
+        <div class="copy-row">
+          <label class="sr-only" for="link">Music addon URL</label>
+          <input id="link" type="url" readonly>
+          <button id="copy" class="secondary" type="button">Copy addon link</button>
+        </div>
+        <p id="copy-status" role="status"></p>
+      </details>
+      <details>
+        <summary>Keep-alive setup</summary>
+        <p>Set your cron service to GET this URL every 10 minutes.</p>
+        <div class="copy-row">
+          <label class="sr-only" for="health-link">Health check URL</label>
+          <input id="health-link" type="url" readonly>
+          <button id="copy-health" class="secondary" type="button">Copy health URL</button>
+        </div>
+        <p id="health-status" role="status"></p>
+      </details>
+    </section>
   </main>
-  <footer>Powered by <a href="https://github.com/aiskendi/pencarimovie-server" rel="noreferrer">PencariMovie Server</a></footer>
+
+  <footer><a href="/dashboard">Server dashboard</a><a href="https://github.com/aiskendi/pencarimovie-server" rel="noreferrer">PencariMovie Server</a></footer>
+  <section id="player" class="player" aria-label="Now playing" hidden>
+    <div class="playing-track"><div id="playing-art" class="art"></div><div><strong id="playing-title"></strong><p id="playing-artist"></p></div></div>
+    <div class="transport">
+      <div class="transport-top"><button id="previous" type="button" class="icon" aria-label="Previous track"><span class="skip-symbol reverse" aria-hidden="true"></span></button><button id="toggle" type="button" class="primary toggle" aria-label="Play"><span class="play-symbol" aria-hidden="true"></span></button><button id="next" type="button" class="icon" aria-label="Next track"><span class="skip-symbol" aria-hidden="true"></span></button></div>
+      <div class="progress"><span id="elapsed">0:00</span><input id="seek" type="range" min="0" max="1" step="0.1" value="0" aria-label="Seek" disabled><span id="duration">0:00</span></div>
+    </div>
+    <div class="volume"><label for="volume">Volume</label><input id="volume" type="range" min="0" max="1" step="0.01" value="1"></div>
+    <p id="playback-status" class="playback-status" role="status"></p>
+    <audio id="audio" preload="metadata"></audio>
+  </section>
 </body>
 </html>

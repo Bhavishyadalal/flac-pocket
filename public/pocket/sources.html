@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex">
+  <title>FLAC Pocket · Music sources</title>
+  <link rel="icon" href="/pocket/mark.png">
+  <link rel="stylesheet" href="/pocket/style.css?v=player">
+  <script src="/pocket/sources.js?v=player" defer></script>
+</head>
+<body>
+  <header class="bar">
+    <a class="brand" href="/"><img src="/pocket/mark.png" alt="" width="36" height="36"><span>FLAC <b>Pocket</b></span></a>
+    <nav aria-label="Main navigation"><a href="/">Listen</a><a href="/pocket/sources.html" aria-current="page">Sources</a></nav>
+  </header>
+  <main class="settings-page">
+    <h1>Music sources</h1>
+    <p>Connect music addons so their tracks appear in search on FLAC Pocket and through its addon link.</p>
+    <noscript><p>Enable JavaScript to manage music sources.</p></noscript>
+    <form id="sign-in" class="settings-card" hidden>
+      <h2>Sign in to manage sources</h2>
+      <label for="password">Server password</label>
+      <div class="copy-row"><input id="password" type="password" autocomplete="current-password" required><button class="primary" type="submit">Sign in</button></div>
+    </form>
+    <section id="manage" class="settings-card" aria-labelledby="external" hidden>
+      <h2 id="external">External addons</h2>
+      <form id="add-source">
+        <label for="addon-url">Addon manifest URL</label>
+        <div class="copy-row"><input id="addon-url" type="url" maxlength="1500" placeholder="https://example.com/manifest.json" required><button class="primary" type="submit">Test and add</button></div>
+      </form>
+      <ul class="source-list" id="sources"></ul>
+      <details class="render-settings">
+        <summary>Keep sources after a Render restart</summary>
+        <p>Copy this list into the <code>POCKET_MUSIC_SOURCES</code> environment variable in Render. Update it when you add or remove a source.</p>
+        <button type="button" id="copy-render" class="secondary">Copy Render value</button>
+        <textarea id="render-value" aria-label="Render environment value" readonly hidden></textarea>
+      </details>
+    </section>
+    <p id="status" role="status">Checking your session…</p>
+  </main>
+  <footer><a href="/dashboard">Server dashboard</a></footer>
+</body>
+</html>

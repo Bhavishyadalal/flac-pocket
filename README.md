@@ -1,6 +1,6 @@
 # FLAC Pocket
 
-A personal music addon for BitChord and Eclipse Music, built on [PencariMovie Server](https://github.com/aiskendi/pencarimovie-server). The homepage copies your music addon link. Open **Server settings** when you need the original dashboard.
+A personal music addon for BitChord and Eclipse Music, built on [PencariMovie Server](https://github.com/aiskendi/pencarimovie-server). The homepage is a music player with search, source filtering, playback and an install link. Open **Server settings** when you need the original dashboard.
 
 ## Deploy on Render
 
@@ -10,6 +10,12 @@ A personal music addon for BitChord and Eclipse Music, built on [PencariMovie Se
 4. After the service is live, open its homepage and choose **Copy addon link**. The link is `https://YOUR-SERVICE.onrender.com/m/manifest.json`.
 
 In **BitChord**, open **Settings → Sources → Add addon**. In **Eclipse Music**, open **Settings → Connections → Add Connection → Addon**. Paste the full link and save. Anyone with the new URL can use the music addon and consume its hosting bandwidth. The addon URL does not contain your server credentials.
+
+## Add external music sources
+
+Open **Sources** in the web player, sign in with **SERVER_PASSWORD**, then paste an addon manifest URL and choose **Test and add**. The source must be a public HTTPS music addon with BitChord-style JSON search and a direct, unencrypted audio stream. Search includes the sources you add in both the web player and the existing `/m/manifest.json` addon. A source's stream is delivered by that source. Add sources whose playback links may be shared with anyone who uses your FLAC Pocket link.
+
+Source changes are stored on the server disk. Render Free can wipe that disk on restart. In **Sources → Keep sources after a Render restart**, copy the value into the Render environment variable **POCKET_MUSIC_SOURCES**. Update the value after changing your source list. Hosts with a persistent `/data` volume retain changes automatically.
 
 ## Server settings
 
